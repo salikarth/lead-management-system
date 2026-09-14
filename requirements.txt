@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+rapidfuzz
+pandas
+pytest
+httpx
+python-multipart

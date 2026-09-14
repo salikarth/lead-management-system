@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lead Management Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"
+        onerror="this.onerror=null; var s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js'; document.head.appendChild(s);"></script>
+<style>
+  :root {
+    --bg: #0f1420;
+    --card: #171d2e;
+    --border: #2a3348;
+    --text: #e6e9f2;
+    --muted: #8b93a8;
+    --accent: #5b8def;
+    --accent-soft: rgba(91, 141, 239, 0.12);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "DM Sans", sans-serif;
+    background: var(--bg);
+    background-image: radial-gradient(circle at top right, rgba(91, 141, 239, 0.11), transparent 34rem);
+    color: var(--text);
+    padding: 32px;
+  }
+  .dashboard-shell {
+    width: min(100%, 1440px);
+    margin: 0 auto;
+  }
+  .header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  h1 {
+    font-size: clamp(1.45rem, 2vw, 1.9rem);
+    line-height: 1.15;
+    margin: 0 0 6px;
+    letter-spacing: 0;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin: 0;
+  }
+  .totals {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 22px;
+    min-width: 0;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+  }
+  .stat-card:first-child {
+    border-color: rgba(91, 141, 239, 0.5);
+    background: linear-gradient(135deg, var(--card), var(--accent-soft));
+  }
+  .stat-card .value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .stat-card .label {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-top: 4px;
+  }
+  .charts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+  }
+  .charts.wide {
+    grid-template-columns: 1fr;
+  }
+  .chart-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    min-width: 0;
+  }
+  .chart-card h2 {
+    font-size: 1rem;
+    margin: 0 0 16px;
+    color: var(--text);
+  }
+  .chart-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .chart-heading h2 { margin: 0; }
+  .chart-heading button {
+    display: none;
+    padding: 6px 10px;
+    font-size: 0.75rem;
+  }
+  .chart-wrap {
+    position: relative;
+    height: 280px;
+  }
+  .empty-state {
+    height: 100%;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    color: var(--muted);
+    text-align: center;
+    font-size: 0.9rem;
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 15px;
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { opacity: 0.9; }
+  #status {
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  #error {
+    color: #f87171;
+    font-size: 0.85rem;
+    margin-top: 8px;
+    display: none;
+  }
+  @media (max-width: 900px) {
+    .charts { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    body { padding: 20px; }
+    .header { align-items: flex-start; flex-direction: column; gap: 16px; }
+    .toolbar { justify-content: flex-start; }
+    .totals { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<main class="dashboard-shell">
+<header class="header">
+  <div>
+    <h1>Lead Management Dashboard</h1>
+    <div class="subtitle">Live data from <code>GET /dashboard</code></div>
+  </div>
+  <div class="toolbar">
+    <button onclick="loadDashboard()">Refresh now</button>
+    <span id="status">Loading...</span>
+  </div>
+</header>
+
+<div id="error"></div>
+
+<div class="totals" id="totals"></div>
+
+<div class="charts">
+  <div class="chart-card">
+    <h2>Leads by Status</h2>
+    <div class="chart-wrap"><canvas id="statusChart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <h2>Leads by Source Channel</h2>
+    <div class="chart-wrap"><canvas id="channelChart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-heading">
+      <h2 id="countryChartTitle">Top 10 Countries</h2>
+      <button id="countryReset" onclick="resetCountryDrilldown()">Back</button>
+    </div>
+    <div class="chart-wrap"><canvas id="countryChart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <h2>Top 10 Owners (Sales Reps)</h2>
+    <div class="chart-wrap"><canvas id="ownerChart"></canvas></div>
+  </div>
+</div>
+
+<div class="charts wide" style="margin-top: 20px;">
+  <div class="chart-card">
+    <h2>Leads Created Over Time</h2>
+    <div class="chart-wrap"><canvas id="monthChart"></canvas></div>
+  </div>
+</div>
+</main>
+
+<script>
+let statusChart, channelChart, countryChart, ownerChart, monthChart;
+let countryChartOptions;
+let countryDrilldown = { country: null, city: null };
+
+const STATUS_COLORS = {
+  "Closed Won": "#35c48b",
+  "Closed Lost": "#f16b6b",
+  "Qualified": "#f2b84b",
+  "Contacted": "#5b8def",
+  "Opportunity": "#8a7cf0",
+  "New": "#6f829f"
+};
+const CHANNEL_COLORS = {
+  "Website": "#5b8def",
+  "Event": "#ef9b52",
+  "LinkedIn": "#4d9de0",
+  "Organic Search": "#35c48b",
+  "Referral": "#a477d4",
+  "Manual/Sales": "#e87878",
+  "Other": "#7b879d"
+};
+const COUNTRY_PALETTE = [
+  "#5b8def", "#35b8ad", "#8a7cf0", "#d58b5d", "#c06caa",
+  "#6aa86e", "#d06b6b", "#6f9fb5", "#b1a15b", "#8b93a8"
+];
+const OWNER_PALETTE = [
+  "#35b8ad", "#5b8def", "#d06b6b", "#8a7cf0", "#d58b5d",
+  "#6aa86e", "#c06caa", "#6f9fb5", "#b1a15b", "#8b93a8"
+];
+
+function colorsForLabels(labels, colorMap, fallback = COUNTRY_PALETTE) {
+  return labels.map((label, index) => colorMap[label] || fallback[index % fallback.length]);
+}
+
+function trendColor(context) {
+  const start = context.p0.parsed.y;
+  const end = context.p1.parsed.y;
+  if (end > start) return "#35c48b";
+  if (end < start) return "#f16b6b";
+  return "#8b93a8";
+}
+
+const dataValueLabels = {
+  id: "dataValueLabels",
+  afterDatasetsDraw(chart) {
+    if (!["bar", "line"].includes(chart.config.type)) return;
+
+    const { ctx, chartArea } = chart;
+    if (chart.config.type === "line") {
+      ctx.save();
+      ctx.font = "600 11px DM Sans, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+
+      chart.data.datasets.forEach((dataset, datasetIndex) => {
+        const meta = chart.getDatasetMeta(datasetIndex);
+        meta.data.forEach((point, index) => {
+          const value = dataset.data[index];
+          if (value === null || value === undefined) return;
+          const props = point.getProps(["x", "y"], true);
+          const previous = index > 0 ? dataset.data[index - 1] : value;
+          ctx.fillStyle = value > previous ? "#35c48b" : value < previous ? "#f16b6b" : "#8b93a8";
+          const y = Math.max(props.y - 9, chartArea.top + 14);
+          ctx.fillText(Number(value).toLocaleString(), props.x, y);
+        });
+      });
+      ctx.restore();
+      return;
+    }
+
+    const horizontal = chart.options.indexAxis === "y";
+    ctx.save();
+    ctx.font = "600 11px DM Sans, sans-serif";
+    ctx.fillStyle = "#e6e9f2";
+    ctx.textBaseline = "middle";
+
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const meta = chart.getDatasetMeta(datasetIndex);
+      meta.data.forEach((bar, index) => {
+        const value = dataset.data[index];
+        if (value === null || value === undefined) return;
+
+        const props = bar.getProps(["x", "y", "base"], true);
+        const label = Number(value).toLocaleString();
+        const padding = 7;
+
+        if (horizontal) {
+          let x = props.x + padding;
+          ctx.textAlign = "left";
+          if (x + ctx.measureText(label).width > chartArea.right) {
+            x = props.x - padding;
+            ctx.textAlign = "right";
+          }
+          ctx.fillText(label, x, props.y);
+        } else {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          const y = Math.max(props.y - padding, chartArea.top + 14);
+          ctx.fillText(label, props.x, y);
+        }
+      });
+    });
+    ctx.restore();
+  }
+};
+
+let dataValueLabelsRegistered = false;
+
+async function loadDashboard(retriesLeft = 6) {
+  const statusEl = document.getElementById("status");
+  const errorEl = document.getElementById("error");
+  statusEl.textContent = "Loading...";
+  errorEl.style.display = "none";
+
+  if (typeof Chart === "undefined" && retriesLeft > 0) {
+    // Chart.js may still be loading (e.g. the CDN fallback script), so
+    // give it a brief moment before treating it as a real failure
+    setTimeout(() => loadDashboard(retriesLeft - 1), 300);
+    return;
+  }
+
+  try {
+    const res = await fetch("/dashboard");
+    if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+    const data = await res.json();
+    if (typeof Chart === "undefined") {
+      throw new Error(
+        "Chart.js library failed to load from the CDN. Check your internet " +
+        "connection, firewall, or ad-blocker (it may be blocking cdnjs.cloudflare.com " +
+        "or cdn.jsdelivr.net)."
+      );
+    }
+    if (!dataValueLabelsRegistered) {
+      Chart.register(dataValueLabels);
+      dataValueLabelsRegistered = true;
+    }
+    render(data);
+    statusEl.textContent = "Last updated: " + new Date().toLocaleTimeString();
+  } catch (e) {
+    errorEl.textContent = "Failed to load dashboard: " + e.message;
+    errorEl.style.display = "block";
+    statusEl.textContent = "Error";
+  }
+}
+
+function updateCountryChartHeader(title, showBack) {
+  document.getElementById("countryChartTitle").textContent = title;
+  document.getElementById("countryReset").style.display = showBack ? "inline-block" : "none";
+}
+
+function drawCountryChart(
+  labels,
+  counts,
+  colors,
+  emptyMessage = "City data is unavailable for this country.",
+  categoryTitle = "Country"
+) {
+  if (countryChart) countryChart.destroy();
+  const chartWrap = document.getElementById("countryChart").parentElement;
+  const canvas = document.getElementById("countryChart");
+  const existingMessage = chartWrap.querySelector(".empty-state");
+  if (existingMessage) existingMessage.remove();
+
+  if (!labels.length) {
+    canvas.style.display = "none";
+    const message = document.createElement("div");
+    message.className = "empty-state";
+    message.textContent = emptyMessage;
+    chartWrap.appendChild(message);
+    return;
+  }
+
+  canvas.style.display = "block";
+  countryChart = new Chart(document.getElementById("countryChart"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{ data: counts, backgroundColor: colors, borderRadius: 4 }]
+    },
+    options: {
+      ...countryChartOptions,
+      scales: {
+        ...countryChartOptions.scales,
+        y: {
+          ...countryChartOptions.scales.y,
+          title: {
+            ...countryChartOptions.scales.y.title,
+            text: categoryTitle
+          }
+        }
+      },
+      onClick: (_event, elements) => {
+        if (!elements.length) return;
+        const label = countryChart.data.labels[elements[0].index];
+        if (!countryDrilldown.country) {
+          loadCountryDrilldown(label);
+        } else if (!countryDrilldown.city && countryChart.data.datasets[0].label === "City") {
+          loadCountryDrilldown(countryDrilldown.country, label);
+        }
+      },
+      onHover: (_event, elements) => {
+        if (_event.native) {
+          _event.native.target.style.cursor = elements.length && !countryDrilldown.city ? "pointer" : "default";
+        }
+      }
+    }
+  });
+}
+
+async function loadCountryDrilldown(country, city = null) {
+  const params = new URLSearchParams({ country });
+  if (city !== null) params.set("city", city);
+
+  try {
+    const res = await fetch(`/dashboard/drilldown?${params}`);
+    if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+    const data = await res.json();
+    countryDrilldown = { country: data.country, city: data.city };
+
+    const labels = data.items.map(item => item.label);
+    const counts = data.items.map(item => item.count);
+    const title = data.dimension === "City"
+      ? `Top Cities in ${data.country}`
+      : data.city
+      ? `Lead Status in ${data.city}, ${data.country}`
+      : `Lead Status in ${data.country}`;
+    const isStatusBreakdown = data.dimension === "Status";
+    const colors = isStatusBreakdown
+      ? colorsForLabels(labels, STATUS_COLORS)
+      : colorsForLabels(labels, {}, COUNTRY_PALETTE);
+
+    updateCountryChartHeader(title, true);
+    drawCountryChart(
+      labels,
+      counts,
+      colors,
+      isStatusBreakdown ? "No status data is available for this country." : `City data is unavailable for ${data.country}.`,
+      isStatusBreakdown ? "Status" : "City"
+    );
+    if (countryChart) countryChart.data.datasets[0].label = data.dimension;
+  } catch (error) {
+    const errorEl = document.getElementById("error");
+    errorEl.textContent = "Failed to load drill-down: " + error.message;
+    errorEl.style.display = "block";
+  }
+}
+
+function resetCountryDrilldown() {
+  if (countryDrilldown.city) {
+    loadCountryDrilldown(countryDrilldown.country);
+  } else {
+    countryDrilldown = { country: null, city: null };
+    loadDashboard();
+  }
+}
+
+function render(data) {
+  document.getElementById("totals").innerHTML = `
+    <div class="stat-card">
+      <div class="value">${data.total_leads.toLocaleString()}</div>
+      <div class="label">Total Leads</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">${data.by_status.length}</div>
+      <div class="label">Status categories</div>
+    </div>
+    <div class="stat-card">
+      <div class="value">${data.by_source_channel.length}</div>
+      <div class="label">Source channels</div>
+    </div>
+  `;
+
+  countryDrilldown = { country: null, city: null };
+  updateCountryChartHeader("Top 10 Countries", false);
+
+  const statusLabels = data.by_status.map(d => d.status);
+  const statusCounts = data.by_status.map(d => d.count);
+  const channelLabels = data.by_source_channel.map(d => d.channel);
+  const channelCounts = data.by_source_channel.map(d => d.count);
+  const countryLabels = data.by_country.map(d => d.country);
+  const countryCounts = data.by_country.map(d => d.count);
+  const ownerLabels = data.by_owner.map(d => d.owner);
+  const ownerCounts = data.by_owner.map(d => d.count);
+  const monthLabels = data.leads_by_month.map(d => d.month);
+  const monthCounts = data.leads_by_month.map(d => d.count);
+
+  if (statusChart) statusChart.destroy();
+  if (channelChart) channelChart.destroy();
+  if (countryChart) countryChart.destroy();
+  if (ownerChart) ownerChart.destroy();
+  if (monthChart) monthChart.destroy();
+
+  const commonOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: {
+        ticks: { color: "#8b93a8" },
+        grid: { color: "#2a3348" },
+        title: { display: true, text: "Category", color: "#8b93a8", padding: 8 }
+      },
+      y: {
+        ticks: { color: "#8b93a8" },
+        grid: { color: "#2a3348" },
+        beginAtZero: true,
+        title: { display: true, text: "Number of leads", color: "#8b93a8", padding: 8 }
+      }
+    }
+  };
+
+  // For horizontal bars (indexAxis: "y"), Chart.js swaps which axis holds
+  // the *values* vs the *categories* -- x becomes the value axis, y becomes
+  // categorical. beginAtZero has to move to x accordingly, or the value
+  // axis is left unscaled and Chart.js falls back to a meaningless 0-1
+  // range (which is exactly the bug that produced empty-looking charts).
+  const horizontalOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    indexAxis: "y",
+    plugins: { legend: { display: false } },
+    scales: {
+      x: {
+        ticks: { color: "#8b93a8" },
+        grid: { color: "#2a3348" },
+        beginAtZero: true,
+        title: { display: true, text: "Number of leads", color: "#8b93a8", padding: 8 }
+      },
+      y: {
+        ticks: { color: "#8b93a8" },
+        grid: { color: "#2a3348" },
+        title: { display: true, text: "Category", color: "#8b93a8", padding: 8 }
+      }
+    }
+  };
+  countryChartOptions = horizontalOptions;
+
+  statusChart = new Chart(document.getElementById("statusChart"), {
+    type: "bar",
+    data: {
+      labels: statusLabels,
+      datasets: [{
+        data: statusCounts,
+        backgroundColor: colorsForLabels(statusLabels, STATUS_COLORS),
+        borderRadius: 4
+      }]
+    },
+    options: commonOptions
+  });
+
+  channelChart = new Chart(document.getElementById("channelChart"), {
+    type: "bar",
+    data: {
+      labels: channelLabels,
+      datasets: [{
+        data: channelCounts,
+        backgroundColor: colorsForLabels(channelLabels, CHANNEL_COLORS),
+        borderRadius: 4
+      }]
+    },
+    options: commonOptions
+  });
+
+  drawCountryChart(
+    countryLabels,
+    countryCounts,
+    colorsForLabels(countryLabels, {}, COUNTRY_PALETTE),
+    "City data is unavailable for this country.",
+    "Country"
+  );
+
+  ownerChart = new Chart(document.getElementById("ownerChart"), {
+    type: "bar",
+    data: {
+      labels: ownerLabels,
+      datasets: [{ data: ownerCounts, backgroundColor: colorsForLabels(ownerLabels, {}, OWNER_PALETTE), borderRadius: 4 }]
+    },
+    options: horizontalOptions
+  });
+
+  monthChart = new Chart(document.getElementById("monthChart"), {
+    type: "line",
+    data: {
+      labels: monthLabels,
+      datasets: [{
+        data: monthCounts,
+        borderColor: "#8b93a8",
+        backgroundColor: "rgba(139, 147, 168, 0.12)",
+        fill: true,
+        tension: 0.3,
+        pointBackgroundColor: context => {
+          if (context.dataIndex === 0) return "#8b93a8";
+          const current = monthCounts[context.dataIndex];
+          const previous = monthCounts[context.dataIndex - 1];
+          if (current > previous) return "#35c48b";
+          if (current < previous) return "#f16b6b";
+          return "#8b93a8";
+        },
+        pointBorderColor: "#0f1420",
+        pointBorderWidth: 2,
+        segment: {
+          borderColor: trendColor,
+          backgroundColor: context => trendColor(context) === "#35c48b"
+            ? "rgba(53, 196, 139, 0.14)"
+            : trendColor(context) === "#f16b6b"
+              ? "rgba(241, 107, 107, 0.14)"
+              : "rgba(139, 147, 168, 0.10)"
+        }
+      }]
+    },
+    options: {
+      ...commonOptions,
+      scales: {
+        ...commonOptions.scales,
+        x: {
+          ...commonOptions.scales.x,
+          title: { display: true, text: "Month", color: "#8b93a8", padding: 8 }
+        }
+      }
+    }
+  });
+}
+
+loadDashboard();
+</script>
+
+</body>
+</html>
