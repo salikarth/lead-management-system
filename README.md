@@ -25,18 +25,18 @@ python -m pytest tests/ -v
 
 The full suite contains 85 tests: 83 deterministic tests (no network calls, no API key needed) covering
 normalization edge cases, dedup scoring (including the "same company, different person"
-false-positive case), source-extraction rules, the Gemini call path (mocked at the HTTP layer —
+ false-positive case), source-extraction rules, the Gemini call path (mocked at the HTTP layer,
 success, network failure, and malformed-response cases), and the API endpoints (filtering,
-patch, ingest/merge, dedupe, dashboard, export, 404/400 paths) — plus 2 live integration tests
+patch, ingest/merge, dedupe, dashboard, export, 404/400 paths), plus 2 live integration tests
 described below. Without `GEMINI_API_KEY`, the expected result is `83 passed, 2 skipped` because
 the live Gemini tests are skipped.
 
 There are also 2 **live** integration tests (`TestGeminiLiveIntegration` in
 `tests/test_source_extraction.py`) that make real, non-mocked calls to the Gemini API. These are
-skipped automatically unless `GEMINI_API_KEY` is set (`pytest.mark.skipif`), on purpose — they're
+skipped automatically unless `GEMINI_API_KEY` is set (`pytest.mark.skipif`), on purpose, they're
 slower, cost API quota, and can fail for reasons that have nothing to do with the code (rate
 limits, transient network issues), so they never block anyone (including a reviewer without a
-key) from running the rest of the suite. Run them too by just setting the key first — no special
+key) from running the rest of the suite. Run them too by just setting the key first, no special
 flag needed, `skipif` picks it up automatically:
 
 ```bash
@@ -60,7 +60,7 @@ of a successful Gemini call.
 
 This mirrors how the test pyramid is normally split in practice: many fast, deterministic,
 mocked unit tests form the base and run on every change; a much smaller number of real
-integration tests exist alongside them but run less often (manually, or on a schedule — not
+integration tests exist alongside them but run less often (manually, or on a schedule, not
 gating every commit) precisely because they're non-deterministic and carry a real cost.
 
 ## Stack and design decisions
@@ -73,8 +73,8 @@ the obvious next step if this needed concurrent writers or to run alongside a re
 validation on `PATCH`/`POST` bodies "for free."
 
 **Data model.** The `leads` table keeps the original CSV values (for display/audit) alongside a
-handful of *derived, normalized* columns — `display_name`, `status_norm`, `email_norm`,
-`email_domain`, `phone_digits`, `company_norm` — computed once at load/ingest time and used for
+handful of *derived, normalized* columns: `display_name`, `status_norm`, `email_norm`,
+`email_domain`, `phone_digits`, and `company_norm`, computed once at load/ingest time and used for
 filtering, search, and dedup blocking. This avoids re-normalizing on every query and keeps the
 raw data intact for a human to sanity-check. See `app/normalize.py`.
 
@@ -83,7 +83,7 @@ Specific messiness handled at load time:
   back to Full Name, degrades gracefully to whichever single field is present. For the ~107 rows
   where only `Full Name` is populated (no `First Name`/`Last Name` at all), `split_full_name()`
   backfills `first_name`/`last_name` by splitting on the first space (first token → first name,
-  remainder → last name) so those columns aren't left empty — `full_name` itself is kept as-is
+  remainder → last name) so those columns aren't left empty. `full_name` itself is kept as-is
   regardless.
 - **Status casing/whitespace** (`New` / `new` / `NEW` / `" New"`): `normalize_status()` trims and
   title-cases into a canonical value used for filtering; the raw value is kept in `status`.
@@ -92,11 +92,11 @@ Specific messiness handled at load time:
   `Country/Region` too. `normalize_country()` handles it the same way, via a `country_norm`
   column used for filtering (raw `country` kept as-is for display/audit).
 - **Mixed date formats**: `normalize_date()` tries a small list of known formats
-  (`YYYY-MM-DD`, `M/D/YYYY`, ISO with `Z`) and returns `''` rather than raising if none match —
+  (`YYYY-MM-DD`, `M/D/YYYY`, ISO with `Z`) and returns `''` rather than raising if none match,
   a bad date shouldn't block a row from loading.
 - **Phone number formatting**: `normalize_phone_digits()` strips everything but digits for the
   full stored `phone_digits` column (country code digits are preserved, only formatting
-  characters like `+`/spaces/parens are removed — no information is lost). Separately, the dedup
+  characters like `+`/spaces/parens are removed, so no information is lost). Separately, the dedup
   *blocking key* (`app/dedup.py`) intentionally uses only the **last 9 digits** of that value, to
   tolerate the same person being entered once with a country code and once without. This is a
   deliberate precision/recall trade-off: it risks grouping two unrelated people who happen to
@@ -114,23 +114,23 @@ Specific messiness handled at load time:
 
 All five required endpoints are implemented in `app/main.py`:
 `GET /leads` (filter by `status`, `owner`, `country`, free-text `q` across name/company/email),
-`GET /leads/:id`, `PATCH /leads/:id` (status/owner/notes — editing notes re-runs source
+`GET /leads/:id`, `PATCH /leads/:id` (status/owner/notes; editing notes re-runs source
 extraction so the derived channel stays in sync), `GET /leads/export` (CSV of the current
 filtered view), `POST /leads/ingest` (see below). Plus `POST /leads/extract-source` (standalone
-access to the source-classification logic — see part 3) and the bonus dashboard endpoints.
+access to the source-classification logic; see part 3) and the bonus dashboard endpoints.
 
-### `POST /leads/ingest` — create-or-merge
+### `POST /leads/ingest`: create-or-merge
 
 Matches an incoming website-form submission (shape: `data/website_form_submissions.json`) against
-existing leads by **exact normalized email, then exact phone digits** — deliberately *not* fuzzy
+existing leads by **exact normalized email, then exact phone digits**, deliberately *not* fuzzy
 matching here, since an automated ingest endpoint needs a decisive yes/no rather than a
 confidence score. (Fuzzy near-duplicates from form resubmissions still get caught later by
 `/leads/dedupe-candidates`, which a human reviews before merging.) On a match, the existing
 lead's notes are appended to (not overwritten) and any previously-blank fields (phone, company,
 country) are backfilled; on no match, a new lead is created with status `New`.
 
-`form_id`, `page_url`, and `submitted_at` — fields present in the JSON payload with no equivalent
-column in the original CRM export — are stored in dedicated `web_form_id` / `web_page_url` /
+`form_id`, `page_url`, and `submitted_at`, fields present in the JSON payload with no equivalent
+column in the original CRM export, are stored in dedicated `web_form_id` / `web_page_url` /
 `web_submitted_at` columns rather than dropped or buried inside `notes`, since they're genuinely
 useful marketing-attribution data (which page a lead was on when they converted). Unlike
 phone/company/country above, these three are **always overwritten** on a repeat submission rather
@@ -149,7 +149,7 @@ them (with fuzzy matching or an LLM call) isn't practical, so the approach is
    `weimingm@delta.co` vs `wei.ming.m@delta.co` without bucketing an entire domain like
    `gmail.com` together), last-9-digits of phone (tolerates different country-code formatting on
    the same real number), and normalized company name. Only leads sharing a bucket are ever
-   compared — this is the "narrow the candidate set first" the brief asks for. Buckets larger
+  compared. This is the "narrow the candidate set first" approach the brief asks for. Buckets larger
    than 50 are skipped entirely (a bucket that big signals a non-selective key, e.g. a very
    generic company name, and isn't worth the O(n²) inside it). On the real 2,049-row dataset this
    runs in **~35ms** and finds candidate pairs from a search space of a few thousand comparisons,
@@ -171,26 +171,26 @@ them (with fuzzy matching or an LLM call) isn't practical, so the approach is
    localparts, differently-punctuated company suffixes). An LLM prompt-based comparator is a
    natural *next step* to add on top for the harder residual cases (e.g. genuinely different
    spellings of the same name across scripts, or judgment calls the reason string doesn't
-   resolve) — because blocking has already cut the candidate set down to a few hundred pairs by
+  resolve), because blocking has already cut the candidate set down to a few hundred pairs by
    that point, an LLM pass there is actually affordable, unlike at the full 2,000-row scale.
    I didn't build that layer given the time budget, since RapidFuzz already surfaces the exact
    cases the brief describes with a fully working, tested implementation.
 
 Exposed via `POST /leads/dedupe-candidates?min_confidence=0.5`, returning ranked **groups** of
-likely duplicates (no auto-merge, as specified) — matching the brief's own wording ("returns
+likely duplicates (no auto-merge, as specified), matching the brief's own wording ("returns
 groups of likely-duplicate leads"). Concretely:
 
 4. **From pairs to groups**: `score_pair()` only ever compares two leads at a time, but a real
    duplicate can appear more than twice (three or more re-entries of the same person). Pairwise
    matches are clustered into groups via union-find/connected-components over the pairs that
-   passed `min_confidence` — if A-B and B-C are both flagged, `{A, B, C}` become one group even
+  passed `min_confidence`. If A-B and B-C are both flagged, `{A, B, C}` become one group even
    though A and C may never have shared a blocking key and so were never directly compared. This
    is the standard way to go from pairwise matches to clusters in record linkage, but it's worth
    naming the trade-off explicitly: it can "chain" together records on the strength of a shared
    third record rather than direct similarity (known as the *chaining problem* in entity
    resolution). To stay conservative, a group's `group_confidence` is the **weakest** edge in the
    group, not an average, and every pairwise comparison that produced the grouping is still
-   returned under `supporting_pairs` — so a reviewer can see exactly which pairs were *actually*
+  returned under `supporting_pairs`, so a reviewer can see exactly which pairs were *actually*
    compared rather than trusting an opaque group-level score. Groups sharing a display name alone
    (no corroborating email/phone/company signal) are never merged together, since that signal
    alone is capped below the default threshold (see point 2 above and
@@ -204,15 +204,15 @@ per row. Reasoning:
 - The example notes in the brief ("Met him at the SFF booth, scanned our QR code", "Found us
   through organic google search then booked a demo") are built from a fairly small, recognizable
   vocabulary of channel signals. A regex pass classifies these instantly, deterministically, and
-  auditably — which matters for a CRM field a sales team will filter and report on. Running this
+  auditably, which matters for a CRM field a sales team will filter and report on. Running this
   against the actual seed data classified roughly 70% of the ~2,000 rows with zero ambiguity
   (see `GET /dashboard` output below).
 - One nuance the rules deliberately get right rather than naively pattern-matching on "google":
   `"Booked a demo... after clicking a google ad"` is a **paid** channel, not Organic Search, even
-  though it mentions Google — the paid-ad rule is checked before the organic-search rule
+  though it mentions Google. The paid-ad rule is checked before the organic-search rule
   specifically to avoid that false positive (see
   `test_paid_google_ad_is_not_misclassified_as_organic`).
-- The remaining ambiguous notes fall through to an LLM call — but **disabled by default** (no
+- The remaining ambiguous notes fall through to an LLM call, but are **disabled by default** (no
   API key is bundled), so the project runs standalone and deterministically without credentials.
   See "LLM usage" below for how to enable it, including a free-tier option.
 - `Original Source` is used only as a fallback when `Notes` is empty, per the brief's warning
@@ -222,12 +222,12 @@ Exposed both as an internal function (called automatically at load time and when
 /leads/:id` updates `notes`) and as a standalone `POST /leads/extract-source` endpoint for
 testing arbitrary text directly. The rule path returns the *matching sentence* as `detail`
 (not the whole note) so trailing CRM-activity commentary unrelated to the source itself
-(e.g. `"Connected, sending proposal."`) is dropped — e.g. `"Referred by Michael Zhang, warm
+(e.g. `"Connected, sending proposal."`) is dropped. For example, `"Referred by Michael Zhang, warm
 intro. Connected, sending proposal."` yields `detail: "Referred by Michael Zhang, warm intro"`.
 
 **Known limitation**: the rule-based `detail` is a cleaned sentence, not a fully extracted
-entity the way the brief's example (`"Singapore FinTech Festival 2026 — Booth QR Code"`)
-implies — it doesn't pull out just the event name or just the referrer's name. Getting from
+entity the way the brief's example (`"Singapore FinTech Festival 2026, Booth QR Code"`)
+implies. It doesn't pull out just the event name or just the referrer's name. Getting from
 "the matching sentence" to "just the named entity" reliably across arbitrary phrasing is
 exactly the kind of judgment call an LLM handles well and regex doesn't generalize to; the LLM
 path is prompted to return that tighter, entity-level detail, which is the main reason I'd
@@ -247,14 +247,14 @@ Current classification breakdown on the real dataset (`GET /dashboard`):
 | LinkedIn | 186 |
 
 The remaining ~210 "Other" rows are genuinely ambiguous free text where a human (or the LLM
-fallback) would need to make a judgment call — they aren't silently miscategorized.
+fallback) would need to make a judgment call. They aren't silently miscategorized.
 
 ### 4. Dashboard (bonus)
 
 `GET /dashboard` returns the data used by the initial visual dashboard: lead counts by status and
 source channel (table above), top-10 breakdowns by country and owner, and a month-by-month
 created-leads trend. `GET /dashboard/view` serves a rendered version on top of this JSON (bar
-charts + a trend line via Chart.js, loaded from a CDN with an automatic jsDelivr fallback — no
+charts + a trend line via Chart.js, loaded from a CDN with an automatic jsDelivr fallback, with no
 build step or extra dependencies).
 
 The country chart supports interactive drill-down. Clicking a country calls
@@ -273,12 +273,12 @@ lead-level filtering.
 
 ## LLM usage / cost
 
-No paid API key was used for this submission — the deterministic rules pass covers the stated
+No paid API key was used for this submission. The deterministic rules pass covers the stated
 examples and the majority of the real dataset, so I didn't want to spend on an LLM call I
 couldn't demonstrate necessity for within the time budget.
 
 `app/source_extraction.py` calls the **Google Gemini API** (`gemini-flash-latest`), gated behind
-a `GEMINI_API_KEY` env var. Gemini has a standing free tier as of 2026 (no card required) — get a
+a `GEMINI_API_KEY` env var. Gemini has a standing free tier as of 2026 (no card required). Get a
 key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
 To try it against the real ~210-row "Other" bucket without spending anything:
@@ -288,8 +288,8 @@ export GEMINI_API_KEY="your-key-here"
 uvicorn app.main:app --reload
 ```
 
-The call is a real, working HTTP request (`_gemini_based()` in `app/source_extraction.py`) — not
-mocked — and fails closed to `method: "fallback"` rather than crashing if the call errors out (bad
+The call is a real, working HTTP request (`_gemini_based()` in `app/source_extraction.py`), not
+mocked, and fails closed to `method: "fallback"` rather than crashing if the call errors out (bad
 key, rate limit, network issue, etc.), so the rest of the system keeps working even if the LLM
 call fails.
 
@@ -329,15 +329,21 @@ Evidence screenshots:
   down to a few hundred candidates, an LLM comparator (or even just a second-pass prompt over the
   borderline 0.5–0.7 confidence band) could resolve genuinely ambiguous cases the fuzzy scorer
   under- or over-calls.
-- **Embeddings-based blocking** as a complement to the exact-key blocking here — would catch
+- **Embeddings-based blocking** as a complement to the exact-key blocking here. This would catch
   cases with no shared email/phone/company key at all (e.g. a company renamed between two
   submissions), which the current blocking strategy would miss entirely.
-- **Auto-merge workflow** with an audit trail, once dedup confidence is trusted enough — currently
+- **Auto-merge workflow** with an audit trail, once dedup confidence is trusted enough. This is currently
   intentionally out of scope per the brief.
 - **Pagination cursor** instead of offset for `/leads` at real scale, and moving to Postgres if
   this needed concurrent writers.
-- Wire the LLM source-extraction fallback into a small eval set to measure agreement with the
+- **Wire the LLM source-extraction fallback** into a small eval set to measure agreement with the
   rules pass, before trusting it on the "Other" bucket unsupervised.
+- **Local/open-source Small Language Model for source extraction** as an alternative to the
+  Gemini fallback. This is close to the SLM inference optimization work in my undergraduate
+  thesis (RAG-based SOP retrieval, published as a peer-reviewed conference paper), and would be
+  worth exploring here because lead `Notes` can contain sensitive customer text. A locally hosted
+  model avoids sending that data to an external API and provides more predictable latency and cost
+  at scale than a pay-per-call provider.
 
 ## Explicitly out of scope
 
