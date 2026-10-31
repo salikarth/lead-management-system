@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Database SQLite lokal, dibuat ulang oleh "python -m app.load_seed" dari data/leads_seed.csv
+data/leads.db
